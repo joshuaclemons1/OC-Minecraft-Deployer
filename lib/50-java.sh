@@ -48,29 +48,29 @@ run_java() {
 
         tmp="$(mktemp -d)"
         if ! curl -fsSL --retry 3 --retry-delay 2 -o "$tmp/jdk.tar.gz" "$url"; then
-            rm -rf "$tmp"
+            rm -rf -- "${tmp:?}"
             die "Could not download Temurin $v for $MCD_JAVA_ARCH." \
                 "Tried: $url" \
                 "If Adoptium has no GA build for that pair yet, set" \
                 "JAVA_VERSIONS in lib/common.sh to one that exists."
         fi
 
-        rm -rf "$jdir.new"
+        rm -rf -- "${jdir:?}.new"
         install -d -m 0755 "$jdir.new"
         tar -xzf "$tmp/jdk.tar.gz" -C "$jdir.new" --strip-components=1 \
-            || { rm -rf "$tmp" "$jdir.new"; die "Temurin $v archive did not extract."; }
-        rm -rf "$tmp"
+            || { rm -rf -- "${tmp:?}" "${jdir:?}.new"; die "Temurin $v archive did not extract."; }
+        rm -rf -- "${tmp:?}"
 
         got="$(_mcd_java_installed_version "$jdir.new")"
         if [ "$got" != "$v" ]; then
-            rm -rf "$jdir.new"
+            rm -rf -- "${jdir:?}.new"
             die "Extracted Temurin $v reports version '${got:-none}' on the host." \
                 "The download may be corrupt or built for another architecture."
         fi
 
         # Swap in only once it is known good, so a failed run never leaves a
         # half-extracted JDK that a server would then try to start with.
-        rm -rf "$jdir"
+        rm -rf -- "${jdir:?}"
         mv "$jdir.new" "$jdir"
         chmod -R a+rX "$jdir"
         ok "Temurin $v installed to $jdir"

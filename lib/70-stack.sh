@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Render the compose stack and bring it up.
 
+# MCD_JAVA_DEGRADED and MCD_TLS_OK are read by lib/80-finalize.sh to decide
+# what caveats the final summary needs to carry.
+# shellcheck disable=SC2034
+
 run_stack() {
     step "Starting the panel"
 

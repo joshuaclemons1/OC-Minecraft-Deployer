@@ -394,7 +394,7 @@ cmd_wipe_server() {
     local w
     for w in "$level" "${level}_nether" "${level}_the_end"; do
         if [ -d "$target/$w" ]; then
-            rm -rf -- "$target/$w"
+            rm -rf -- "${target:?}/${w:?}"
             printf '  removed %s\n' "$w"
         fi
     done
@@ -465,19 +465,19 @@ cmd_uninstall() {
     printf '==> Removing files\n'
     rm -f /usr/local/bin/mcd /etc/sysctl.d/99-mcd.conf
     if [ "$purge" -eq 1 ]; then
-        rm -rf "$MCD_ROOT"
+        rm -rf -- "${MCD_ROOT:?}"
         printf '    removed %s including backups\n' "$MCD_ROOT"
     else
         local keep
         keep="$(mktemp -d)"
         [ -d "$MCD_BACKUPS" ] && mv "$MCD_BACKUPS" "$keep/backups" 2>/dev/null || true
-        rm -rf "$MCD_ROOT"
+        rm -rf -- "${MCD_ROOT:?}"
         if [ -d "$keep/backups" ]; then
             install -d -m 0755 "$MCD_ROOT"
             mv "$keep/backups" "$MCD_BACKUPS"
             printf '    removed %s, kept backups in %s\n' "$MCD_ROOT" "$MCD_BACKUPS"
         fi
-        rm -rf "$keep"
+        rm -rf -- "${keep:?}"
     fi
 
     printf '\n  Done. Docker itself and the 2 GB swapfile were left in place:\n'

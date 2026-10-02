@@ -51,7 +51,7 @@ if [ -d "$MCD_SRC/.git" ]; then
     git -C "$MCD_SRC" reset --quiet --hard "origin/$MCD_BRANCH"
 else
     install -d -m 0755 "$MCD_ROOT"
-    rm -rf "$MCD_SRC"
+    rm -rf -- "${MCD_SRC:?}"
     git clone --quiet --depth 1 --branch "$MCD_BRANCH" "$MCD_REPO_URL" "$MCD_SRC"
 fi
 

@@ -87,9 +87,12 @@ printf '\nconf_set\n'
 MCD_CONF="$MCD_ROOT/mcd.conf"
 conf_set FOO bar
 conf_set BAZ qux
+# shellcheck disable=SC1090
 check "writes a key"            "bar" "$(. "$MCD_CONF"; printf '%s' "$FOO")"
 conf_set FOO changed
+# shellcheck disable=SC1090
 check "replaces, not appends"   "changed" "$(. "$MCD_CONF"; printf '%s' "$FOO")"
+# shellcheck disable=SC1090
 check "leaves other keys alone" "qux" "$(. "$MCD_CONF"; printf '%s' "$BAZ")"
 check "one line per key"        "1" "$(grep -c '^FOO=' "$MCD_CONF")"
 

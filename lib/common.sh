@@ -2,6 +2,11 @@
 # Shared configuration, logging, and helpers for OC-Minecraft-Deployer.
 # Sourced by install.sh, every lib/NN-*.sh step, and bin/mcd.
 
+# Most definitions here are consumed by the lib/NN-*.sh steps and by bin/mcd,
+# which source this file. shellcheck analyses each file alone and so reports
+# them as unused; they are not.
+# shellcheck disable=SC2034
+
 # --------------------------------------------------------------- source --
 
 MCD_REPO_URL="${MCD_REPO_URL:-https://github.com/joshuaclemons1/OC-Minecraft-Deployer.git}"
