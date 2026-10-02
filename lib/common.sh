@@ -105,6 +105,18 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # terminal and therefore a human who can answer a prompt.
 tty_available() { (exec 3</dev/tty) 2>/dev/null; }
 
+# Strip carriage returns and surrounding whitespace from a pasted value.
+# Pasting from a Windows clipboard can carry a trailing CR, which would be sent
+# verbatim inside the DuckDNS update URL and rejected with no useful explanation.
+trim() {
+    local s="$1"
+    s="${s//$'\r'/}"
+    s="${s//$'\n'/}"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
         die "This needs to run as root." \
@@ -156,6 +168,7 @@ ask() {
         printf '    %s: ' "$__prompt" >/dev/tty
     fi
     IFS= read -r __reply </dev/tty || __reply=''
+    __reply="$(trim "$__reply")"
     [ -z "$__reply" ] && __reply="$__default"
     eval "$__var=\$__reply"
 }

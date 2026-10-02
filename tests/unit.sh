@@ -103,6 +103,20 @@ check "replaces, not appends"   "changed" "$(. "$MCD_CONF"; printf '%s' "$FOO")"
 check "leaves other keys alone" "qux" "$(. "$MCD_CONF"; printf '%s' "$BAZ")"
 check "one line per key"        "1" "$(grep -c '^FOO=' "$MCD_CONF")"
 
+printf '\ntrim (pasted values)\n'
+check "plain value unchanged"        "abc123"   "$(trim 'abc123')"
+check "strips a trailing CR"         "token123" "$(trim "token123$(printf '\r')")"
+check "strips a leading CR"          "token123" "$(trim "$(printf '\r')token123")"
+check "strips surrounding spaces"    "token123" "$(trim '   token123   ')"
+check "strips tabs"                  "token123" "$(trim "$(printf '\ttoken123\t')")"
+check "strips CR plus whitespace"    "token123" "$(trim "$(printf ' token123 \r')")"
+check "keeps internal spaces"        "a b"      "$(trim '  a b  ')"
+check "empty stays empty"            ""         "$(trim '')"
+check "whitespace only becomes empty" ""        "$(trim '   ')"
+# A real DuckDNS token shape, as pasted from a browser on Windows.
+check "duckdns token with CR" "8f2c1b9e-4a6d-47f1-9c3b-2e5a7d81f0bc" \
+    "$(trim "8f2c1b9e-4a6d-47f1-9c3b-2e5a7d81f0bc$(printf '\r')")"
+
 printf '\ngen_password\n'
 _pw="$(gen_password)"
 check "24 characters"  "24" "${#_pw}"

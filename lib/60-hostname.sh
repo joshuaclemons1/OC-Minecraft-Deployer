@@ -31,6 +31,16 @@ _mcd_duckdns_update() {
         "https://www.duckdns.org/update?domains=${sub}&token=${token}&ip=" 2>&1)" || response="request failed"
     case "$response" in
         OK*) return 0 ;;
+        KO*)
+            # DuckDNS answers a bare "KO" for every failure and explains nothing,
+            # so spell out the only three things it can mean.
+            err "DuckDNS rejected the update (it replied just \"KO\")."
+            err "That means one of:"
+            err "  - the token is wrong, truncated, or has stray characters"
+            err "  - the subdomain '$sub' is not registered to this account"
+            err "  - the subdomain was typed with .duckdns.org still attached"
+            err "Check both at https://www.duckdns.org/ and re-run."
+            return 1 ;;
         *)   err "DuckDNS replied: $response"; return 1 ;;
     esac
 }
@@ -76,10 +86,24 @@ EOT
                        "Register one free at https://www.duckdns.org/ and re-run."
             # Tolerate someone pasting the whole hostname.
             MCD_DUCKDNS_SUB="${MCD_DUCKDNS_SUB%%.duckdns.org}"
-            ask_secret MCD_DUCKDNS_TOKEN "DuckDNS token (from the top of duckdns.org)"
+            # Echoed on purpose, where a password would be hidden.
+            #
+            # This is a 36-character token that nobody types from memory; it gets
+            # pasted. A silent read shows nothing at all when you paste, so there
+            # is no way to tell whether the paste landed, whether the terminal
+            # swallowed it, or whether the prompt is simply broken - and the first
+            # person to try it reported exactly that. The token is also
+            # low-sensitivity: it controls only this account's DuckDNS subdomains,
+            # and it appears solely on the operator's own screen.
+            #
+            # Visible confirmation beats theoretical concealment here.
+            ask MCD_DUCKDNS_TOKEN "DuckDNS token (paste it - from the top of duckdns.org)" ""
             [ -n "$MCD_DUCKDNS_TOKEN" ] \
                 || die "A DuckDNS token is required." \
-                       "It is shown at the top of https://www.duckdns.org/ once signed in."
+                       "It is shown at the top of https://www.duckdns.org/ once signed in." \
+                       "If pasting does not work in your terminal, pass it instead:" \
+                       "    sudo MCD_DNS_MODE=1 MCD_DUCKDNS_SUB=name MCD_DUCKDNS_TOKEN=tok bash bootstrap.sh"
+            ok "Token received (${#MCD_DUCKDNS_TOKEN} characters)"
 
             MCD_HOSTNAME="${MCD_DUCKDNS_SUB}.duckdns.org"
             info "Pointing $MCD_HOSTNAME at $MCD_PUBLIC_IP"
