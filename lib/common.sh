@@ -101,6 +101,10 @@ die() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# True only when /dev/tty can actually be opened, i.e. there is a controlling
+# terminal and therefore a human who can answer a prompt.
+tty_available() { (exec 3</dev/tty) 2>/dev/null; }
+
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
         die "This needs to run as root." \
@@ -116,7 +120,11 @@ require_root() {
 # human from /dev/tty, and treat "no tty" as non-interactive rather than
 # hanging or silently taking an empty answer.
 MCD_INTERACTIVE=0
-if [ -r /dev/tty ] && [ -c /dev/tty ]; then MCD_INTERACTIVE=1; fi
+# Attempt the open rather than testing the node. /dev/tty exists and is
+# world-readable with no controlling terminal attached, so `[ -r /dev/tty ]`
+# returns true and every subsequent read from it fails with ENXIO - which looks
+# like a hung or crashed installer rather than "there is nobody to ask".
+if tty_available; then MCD_INTERACTIVE=1; fi
 [ "${MCD_UNATTENDED:-0}" = "1" ] && MCD_INTERACTIVE=0
 
 # ask VAR "Prompt" "default"

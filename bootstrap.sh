@@ -60,7 +60,14 @@ printf '    at commit %s\n' "$(git -C "$MCD_SRC" rev-parse --short HEAD)" >&2
 # Hand over. Pass the environment through so MCD_* overrides keep working, and
 # keep stdin attached to the terminal rather than this script's pipe.
 cd "$MCD_SRC"
-if [ -r /dev/tty ]; then
+
+# `[ -r /dev/tty ]` is not a usable test for "is there a terminal". The device
+# node exists and is world-readable even when the process has no controlling
+# terminal, so the test passes and the redirect then fails with ENXIO:
+#   /dev/tty: No such device or address
+# which aborts the install before it starts. Attempt the open instead and let it
+# fail harmlessly in a subshell.
+if (exec 3</dev/tty) 2>/dev/null; then
     exec bash "$MCD_SRC/install.sh" "$@" </dev/tty
 else
     exec bash "$MCD_SRC/install.sh" "$@"
