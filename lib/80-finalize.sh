@@ -12,11 +12,25 @@ run_finalize() {
     # Crafty generates its own admin password on first run and writes it here.
     # The file cannot be used to *set* a password, only to read the initial one,
     # so we copy it somewhere with tight permissions and tell the user once.
+    # The file is JSON:
+    #   { "username": "admin", "password": "...", "info": "..." }
+    # Confirmed by reading a real one on a live install. Parse it with jq rather
+    # than grep: the generated password contains #, ^, @, *, !, & and $, and a
+    # regex that stops at whitespace happily swallows the closing quote and
+    # comma, which is exactly what the first version printed.
     local creds="$MCD_DATA/config/default-creds.txt"
     local user='' pass=''
     if [ -s "$creds" ]; then
-        user="$(grep -oiE 'username[^[:alnum:]]+[A-Za-z0-9_-]+' "$creds" | head -n1 | grep -oE '[A-Za-z0-9_-]+$')"
-        pass="$(grep -oiE 'password[^[:alnum:]]+[^[:space:]]+' "$creds" | head -n1 | sed 's/^[Pp]assword[^[:alnum:]]*//')"
+        if have jq && jq -e . "$creds" >/dev/null 2>&1; then
+            user="$(jq -r '.username // empty' "$creds" 2>/dev/null)"
+            pass="$(jq -r '.password // empty' "$creds" 2>/dev/null)"
+        fi
+        # Fall back to text scraping only if it is not valid JSON, in case a
+        # future Crafty release changes the format again.
+        if [ -z "$pass" ]; then
+            user="$(sed -nE 's/.*"?username"?[[:space:]]*[:=][[:space:]]*"?([^"]*).*/\1/p' "$creds" | head -n1)"
+            pass="$(sed -nE 's/.*"?password"?[[:space:]]*[:=][[:space:]]*"?([^"]*).*/\1/p' "$creds" | head -n1)"
+        fi
         install -m 0600 "$creds" "$MCD_SECRETS/panel-creds.txt"
         conf_set MCD_PANEL_USER "${user:-admin}"
     fi

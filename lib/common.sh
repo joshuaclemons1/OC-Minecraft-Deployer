@@ -219,8 +219,14 @@ suggested_heap_mb() {
 conf_set() {
     local key="$1" value="$2" dir
     dir="$(dirname "$MCD_CONF")"
-    [ -d "$dir" ] || install -d -m 0750 "$dir"
-    [ -f "$MCD_CONF" ] || { touch "$MCD_CONF"; chmod 0640 "$MCD_CONF"; }
+    [ -d "$dir" ] || install -d -m 0755 "$dir"
+    [ -f "$MCD_CONF" ] || touch "$MCD_CONF"
+    # World readable on purpose, and asserted on every write rather than only at
+    # creation so an older 0640 file gets corrected. This holds no secrets - the
+    # hostname, public IP, email and Java paths. Secrets live in $MCD_SECRETS at
+    # 0600. If it were unreadable, every unprivileged `mcd` subcommand would die
+    # in conf_load.
+    chmod 0644 "$MCD_CONF" 2>/dev/null || true
     if grep -q "^${key}=" "$MCD_CONF" 2>/dev/null; then
         sed -i "s|^${key}=.*|${key}=${value}|" "$MCD_CONF"
     else
@@ -229,8 +235,13 @@ conf_set() {
 }
 
 conf_load() {
-    # shellcheck disable=SC1090
-    [ -f "$MCD_CONF" ] && . "$MCD_CONF"
+    # Never fatal. bin/mcd runs under `set -e`, and a config that cannot be read
+    # should degrade to defaults rather than abort the command - read-only
+    # subcommands like `mcd java` have no business requiring root.
+    if [ -r "$MCD_CONF" ]; then
+        # shellcheck disable=SC1090
+        . "$MCD_CONF" 2>/dev/null || true
+    fi
     return 0
 }
 

@@ -60,7 +60,10 @@ cmd_status() {
 
     printf '  %sContainers%s\n' "$C_BOLD" "$C_RESET"
     if [ -f "$MCD_ROOT/compose.yaml" ]; then
-        compose ps --format '    {{.Service}}  {{.State}}  {{.Status}}' 2>/dev/null \
+        # Indent with sed, not in the template: compose strips leading
+        # whitespace from --format output.
+        compose ps --format '{{.Service}}  {{.State}}  {{.Status}}' 2>/dev/null \
+            | sed 's/^/    /' \
             || printf '    (could not query docker)\n'
     else
         printf '    no compose.yaml - not installed?\n'

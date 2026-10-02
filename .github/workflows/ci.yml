@@ -41,10 +41,17 @@ jobs:
           # lib/*.sh and bin/mcd are sourced, not standalone, so tell
           # shellcheck where the definitions come from.
           shellcheck -x -S warning \
-            bootstrap.sh install.sh tests/unit.sh lib/*.sh bin/mcd
+            bootstrap.sh install.sh tests/*.sh lib/*.sh bin/mcd
 
       - name: Unit tests
         run: bash tests/unit.sh
+
+      # Runs with jq present here and absent on a Windows dev box, so between
+      # the two environments both the jq path and the sed fallback get covered.
+      - name: Credential parsing tests
+        run: |
+          jq --version
+          bash tests/creds.sh
 
   compose:
     name: compose template renders
