@@ -23,9 +23,37 @@ run_docker() {
             ok "Docker signing key installed"
         fi
 
+        # Docker does not publish a repository for a brand-new Ubuntu release on
+        # day one, and OCI offers the newest LTS as soon as it exists. Writing an
+        # unsupported codename into sources.list makes `apt-get update` fail with
+        # a 404 that looks like a network problem. Check first, and fall back to
+        # the newest codename Docker actually serves.
+        local codename="$MCD_OS_CODENAME"
+        if ! curl -fsI --max-time 15 -o /dev/null \
+                "https://download.docker.com/linux/$MCD_OS_ID/dists/$codename/Release"; then
+            warn "Docker has no repository for ${MCD_OS_ID} '${codename}' yet."
+            local candidate found=''
+            # Newest first. Packages for the previous LTS run fine on the newer
+            # release; this is the same thing Docker's own install script does.
+            for candidate in noble jammy focal bookworm bullseye; do
+                if curl -fsI --max-time 15 -o /dev/null \
+                        "https://download.docker.com/linux/$MCD_OS_ID/dists/$candidate/Release"; then
+                    found="$candidate"; break
+                fi
+            done
+            [ -n "$found" ] || die \
+                "Docker publishes no usable repository for $MCD_OS_ID." \
+                "Tried '$codename' and the known fallbacks." \
+                "Rebuild the instance with Canonical Ubuntu 24.04, which is the" \
+                "version this project targets."
+            warn "Falling back to the '$found' repository, which is compatible."
+            codename="$found"
+        fi
+        ok "Docker repository: $MCD_OS_ID/$codename"
+
         local list=/etc/apt/sources.list.d/docker.list
-        local line="deb [arch=$MCD_ARCH signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$MCD_OS_ID $MCD_OS_CODENAME stable"
-        if [ ! -f "$list" ] || ! grep -qxF "$line" "$list"; then
+        local line="deb [arch=$MCD_ARCH signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$MCD_OS_ID $codename stable"
+        if [ ! -f "$list" ] || ! grep -qxF -- "$line" "$list"; then
             printf '%s\n' "$line" >"$list"
             ok "Docker apt repository configured"
         fi
