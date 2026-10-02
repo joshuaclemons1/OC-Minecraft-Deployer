@@ -153,6 +153,26 @@ Java 25, started by Crafty, unpacked its libraries (including
 `netty-transport-native-epoll-linux-aarch_64`) and halted at the EULA gate with
 `logs/latest.log` written. That is the whole chain working.
 
+### Reboot recovery, validated unintentionally
+
+The instance was then resized from 1 OCPU / 6 GB to 2 OCPU / 12 GB, which forces
+a reboot. Everything came back without intervention, and the panel was serving
+HTTPS before SSH would even accept a connection:
+
+- both containers auto-restarted (`restart: unless-stopped`)
+- `mcd-firewall.service` ran with `ExecMainStatus=0`
+- all four INPUT rules were reinserted above Oracle's blanket REJECT
+- Docker's chains were still above Oracle's FORWARD REJECT
+- the swapfile came back via fstab
+
+This is the first confirmation that ordering `mcd-firewall.service` after both
+`docker.service` and `netfilter-persistent.service` actually produces the right
+result on a real boot, rather than only in theory.
+
+The resize also exercised the scaled memory reserve at a second size: the same
+box recommended a 4096 MB heap at 6 GB (1536 reserve) and 9216 MB at 12 GB
+(2560 reserve).
+
 ### Hard constraint found during that run: the container's uid
 
 The Crafty container's entrypoint starts as root but drops the application to
