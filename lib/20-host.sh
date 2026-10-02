@@ -12,6 +12,24 @@ run_host() {
     # are owned correctly rather than appearing as root-owned mount points.
     install -d -m 0755 "$MCD_DATA/servers" "$MCD_DATA/config" "$MCD_DATA/logs" \
                        "$MCD_DATA/backups" "$MCD_DATA/import"
+
+    # These are bind-mounted into the container, where the application runs as
+    # uid 1000 / gid 0 rather than root. Left as root:root it can create neither
+    # a server directory nor a backup directory. Only the mount points are
+    # chowned, not their contents: worlds can be many gigabytes, and anything
+    # Crafty creates inside is already owned correctly.
+    local d target owner
+    for d in servers config logs backups import; do
+        target="$MCD_DATA/$d"
+        owner="$(stat -c '%u:%g' "$target")"
+        if [ "$owner" != "${CRAFTY_UID}:${CRAFTY_GID}" ]; then
+            chown "${CRAFTY_UID}:${CRAFTY_GID}" "$target"
+            ok "crafty/$d owned by ${CRAFTY_UID}:${CRAFTY_GID}"
+        else
+            skip "crafty/$d ownership already correct"
+        fi
+        chmod 0775 "$target"
+    done
     ok "Layout under $MCD_ROOT"
 
     export DEBIAN_FRONTEND=noninteractive

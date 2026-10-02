@@ -106,10 +106,11 @@ Mitigation to design: a minimal, honest activity floor (the JVM holding its heap
 
 ## Status
 
-Phases 1–3 are written and the pure logic is unit-tested (`bash tests/unit.sh`,
-32 assertions). **Nothing has been run end-to-end on a live Oracle instance
-yet** — that is the next step, and until it happens every step below is
-"implemented" rather than "working".
+Phases 1–3 are written, unit-tested (`tests/unit.sh` 38 assertions,
+`tests/creds.sh` 8) and **validated end-to-end on a live Oracle Cloud Always
+Free A1 instance on 2026-10-02**: install, TLS, firewall, Java 21/25 in the
+container, panel reachable over HTTPS, a Minecraft 26.3 server created and
+started, and a re-run confirming idempotency.
 
 What exists:
 
@@ -134,23 +135,42 @@ What exists:
 Deliberately not implemented yet: Modrinth modpack automation, off-box backups
 to Object Storage, the idle-reclamation mitigation, Geyser, Terraform.
 
-### Known-unverified assumptions
+### Assumptions, all now resolved on live hardware
 
-Each of these is a guess until the first live run proves or disproves it:
+Validated 2026-10-02 on an Always Free A1 instance (Ubuntu 24.04.5, aarch64,
+1 OCPU, 5903 MB, Docker 29.8.2, Crafty 4.11.0).
 
-1. **Temurin aarch64 runs against the Crafty image's glibc.** The whole
-   bind-mount approach rests on this. `verify_java_in_container` tests it
-   explicitly and degrades loudly rather than silently.
-2. **Oracle's FORWARD REJECT really does sit below Docker's chains** in
-   practice. The code handles both orders, but only a live box confirms which
-   one actually occurs.
-3. **`default-creds.txt` format.** The parser in `80-finalize.sh` greps for
-   username and password; if the real file is shaped differently it falls back
-   to pointing at the file, but the summary will be less useful.
-4. **Crafty accepts a per-server Java path** pointing outside `/usr/lib/jvm`.
-   Expected to be a free-text field; needs confirming in the UI.
-5. **`compose ps --status running --services`** flag support on the installed
-   compose version.
+| # | Assumption | Outcome |
+|---|---|---|
+| 1 | Temurin aarch64 runs against the image's glibc | **Holds.** Java 21.0.12.1 and 25.0.4.1 both execute inside the stock container. No derived image needed. |
+| 2 | Oracle's FORWARD REJECT sits below Docker's chains | **Holds.** Docker inserts `DOCKER-USER` and `DOCKER-FORWARD` above it and sets the policy to DROP. No reorder was needed, but the code still handles the other order. |
+| 3 | `default-creds.txt` format | **Wrong.** It is JSON. The grep parser printed a trailing quote and comma. Fixed, with `tests/creds.sh` pinning it. |
+| 4 | Crafty accepts an external Java path | **Holds.** `execution_command` is free text; a PATCH to `/opt/java/jdk-25/bin/java ...` is stored verbatim and used. |
+| 5 | `compose ps --status running --services` | **Holds.** |
+
+End-to-end proof: a vanilla **26.3** server created through the API, pointed at
+Java 25, started by Crafty, unpacked its libraries (including
+`netty-transport-native-epoll-linux-aarch_64`) and halted at the EULA gate with
+`logs/latest.log` written. That is the whole chain working.
+
+### Hard constraint found during that run: the container's uid
+
+The Crafty container's entrypoint starts as root but drops the application to
+**uid 1000 (`crafty`), gid 0**. Bind-mounted directories created as `root:root`
+are therefore unwritable by it, and server creation fails with a CRITICAL
+`Permission denied: '/crafty/servers/<id>'` in Crafty's `session.log` while the
+API reports only a misleading `No such file or directory:
+'/crafty/servers/<id>/server.properties'`.
+
+`lib/20-host.sh` now chowns the five mount points to `${CRAFTY_UID}:${CRAFTY_GID}`
+(mount points only, not contents, since worlds get large and anything Crafty
+creates inside is already owned correctly).
+
+A lesson about the test, not just the fix: the original writability check ran
+`docker exec` without `-u`, which defaults to the image's root user. It wrote to
+a root-owned mount, reported success, and hid the very bug it existed to catch.
+`_mcd_verify_writable` now runs as `${CRAFTY_UID}` explicitly. A privilege check
+performed with the wrong privileges is worse than no check at all.
 
 ## Order of work
 

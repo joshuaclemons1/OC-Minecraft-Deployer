@@ -32,6 +32,7 @@ mcd - manage your Minecraft host
 
   mcd status              Is everything running? Memory, disk, certificate.
   mcd logs [service]      Recent logs (service: crafty or caddy)
+  mcd restart             Restart the panel and proxy
   mcd creds               Show the panel's initial admin credentials
   mcd password            How to change the panel password
   mcd java                Which Java path to use for which Minecraft version
@@ -115,6 +116,16 @@ cmd_status() {
 }
 
 # ----------------------------------------------------------------- logs --
+
+cmd_restart() {
+    need_root restart
+    printf 'Restarting the stack...
+'
+    compose up -d
+    compose restart
+    printf 'Done.
+'
+}
 
 cmd_logs() {
     local svc="${1:-}"
@@ -498,6 +509,7 @@ cmd_uninstall() {
 case "${1:-}" in
     status)      shift; cmd_status "$@" ;;
     logs)        shift; cmd_logs "$@" ;;
+    restart)     shift; cmd_restart "$@" ;;
     creds)       shift; cmd_creds "$@" ;;
     password)    shift; cmd_password "$@" ;;
     java)        shift; cmd_java "$@" ;;

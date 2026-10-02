@@ -4,7 +4,7 @@ Turn a free Oracle Cloud server into a Minecraft server you manage entirely from
 
 One command sets up the whole machine. After that you never need the command line again — you create servers, pick versions, install modpacks, upload mods, read the console, and restart things from a web panel you can share with your friends.
 
-> **Status: works, but not yet validated on a live instance.** Every step below is implemented and the logic is unit-tested, but the installer has not yet completed an end-to-end run on a real Oracle Cloud box. Treat the first run as a test, not as something to put a world you care about on. Items still unbuilt are marked **(planned)**. See the [roadmap](docs/ROADMAP.md).
+> **Status: validated on real hardware.** On 2026-10-02 this installed cleanly end to end on an Oracle Cloud Always Free A1 instance (Ubuntu 24.04.5, aarch64) and ran a Minecraft **26.3** server: real Let's Encrypt certificate, both firewalls handled, Java 25 supplied to the panel, re-runs idempotent. A few extras are still unbuilt and marked **(planned)**. See the [roadmap](docs/ROADMAP.md).
 
 ---
 
@@ -209,8 +209,18 @@ The script is **idempotent** — safe to run again. It will not duplicate anythi
 2. **Server → Create new server.**
 3. Pick your flavor and version, or import a modpack (see below).
 4. Set memory using the table above.
-5. Click **Create**, then **Start**.
-6. Your friends connect to `yourname.duckdns.org` (port `25565` is the default and usually does not need typing).
+5. Click **Create**.
+6. **Accept the Minecraft EULA.** Every Minecraft server refuses to start until
+   you do. Start the server once and it will stop immediately, having written an
+   `eula.txt`; open that file in the panel's file manager, change `eula=false` to
+   `eula=true`, save, and start it again. You are agreeing to
+   [Mojang's EULA](https://aka.ms/MinecraftEULA), which is why nothing can tick
+   that box for you.
+7. Your friends connect to `yourname.duckdns.org` (port `25565` is the default and usually does not need typing).
+
+For a current release (26.x) set the server's Java path to
+`/opt/java/jdk-25/bin/java`; `mcd java` prints the full map. On a modded or
+older version the panel's default is usually right.
 
 ### Mods and modpacks
 

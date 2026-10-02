@@ -95,6 +95,18 @@ _mcd_print_summary() {
     printf '     Use a port between %s and %s.\n' "$MC_PORT_START" "$MC_PORT_END" >&2
     printf '\n' >&2
 
+    if [ "${MCD_WRITE_BROKEN:-0}" = "1" ]; then
+        printf '   %s! The panel cannot write to its data directories.%s
+' "$C_RED" "$C_RESET" >&2
+        printf '     Creating a server WILL fail until this is fixed:
+' >&2
+        printf '       sudo chown %s:%s %s/{servers,backups,config,logs,import}
+'             "$CRAFTY_UID" "$CRAFTY_GID" "$MCD_DATA" >&2
+        printf '       sudo mcd restart
+
+' >&2
+    fi
+
     if [ "${MCD_JAVA_DEGRADED:-0}" = "1" ]; then
         printf '   %s! Java 21/25 are not working in the container.%s\n' "$C_YELLOW" "$C_RESET" >&2
         printf '     Minecraft 1.20.4 and older will run; newer versions will not.\n' >&2

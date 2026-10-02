@@ -60,9 +60,44 @@ run_stack() {
     # leaving the box with no mcd command and no summary explaining what to fix.
     # Record the outcome instead and let the summary carry the caveats.
     _mcd_wait_for_crafty        || MCD_CRAFTY_SLOW=1
+    _mcd_verify_writable        || MCD_WRITE_BROKEN=1
     verify_java_in_container    || MCD_JAVA_DEGRADED=1
     _mcd_wait_for_certificate   || MCD_TLS_OK=0
 
+    return 0
+}
+
+# Confirm the application user can actually write to the bind mounts.
+#
+# Must run as CRAFTY_UID, not root. A `docker exec` without -u runs as the
+# image's root user and will happily write to a root-owned mount, reporting
+# success while the real application is locked out. That false negative cost an
+# afternoon: server creation failed with a misleading "No such file or
+# directory: .../server.properties" while the actual cause, logged only in
+# Crafty's own session.log, was "Permission denied".
+_mcd_verify_writable() {
+    step "Checking the container can write to its data directories"
+
+    local d failed=0
+    for d in servers backups config logs import; do
+        if compose exec -T -u "${CRAFTY_UID}:${CRAFTY_GID}" crafty \
+                sh -c "mkdir -p /crafty/$d/.mcd-write-test && rmdir /crafty/$d/.mcd-write-test" \
+                >/dev/null 2>&1; then
+            ok "/crafty/$d writable by uid ${CRAFTY_UID}"
+        else
+            err "/crafty/$d NOT writable by uid ${CRAFTY_UID}"
+            failed=1
+        fi
+    done
+
+    if [ "$failed" -eq 1 ]; then
+        warn ""
+        warn "Crafty runs as uid ${CRAFTY_UID} inside the container and cannot write"
+        warn "to the directories above, so creating a server will fail. Fix with:"
+        warn "    sudo chown ${CRAFTY_UID}:${CRAFTY_GID} $MCD_DATA/{servers,backups,config,logs,import}"
+        warn "    sudo mcd restart"
+        return 1
+    fi
     return 0
 }
 

@@ -38,6 +38,15 @@ CRAFTY_TAG="${CRAFTY_TAG:-4.11.0}"
 CRAFTY_IMAGE="${CRAFTY_IMAGE:-registry.gitlab.com/crafty-controller/crafty-4}"
 CADDY_IMAGE="${CADDY_IMAGE:-caddy:2-alpine}"
 
+# The Crafty container's entrypoint starts as root, but it drops the actual
+# application to uid 1000 ("crafty") with gid 0. Bind-mounted directories must
+# therefore be writable by that uid, not just by root. Getting this wrong makes
+# server creation fail with a CRITICAL "Permission denied: /crafty/servers/<id>"
+# in Crafty's session.log, which the API unhelpfully reports as
+# "No such file or directory: '/crafty/servers/<id>/server.properties'".
+CRAFTY_UID="${CRAFTY_UID:-1000}"
+CRAFTY_GID="${CRAFTY_GID:-0}"
+
 # Minecraft 26.x needs Java 25; 1.20.5-1.21.11 need 21. The stock Crafty
 # image ships only 8/11/17, so we supply these two and mount them in.
 JAVA_VERSIONS=(21 25)
