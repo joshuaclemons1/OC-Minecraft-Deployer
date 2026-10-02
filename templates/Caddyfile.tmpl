@@ -8,25 +8,50 @@
 @@HOSTNAME@@ {
 	encode zstd gzip
 
-	# Crafty serves HTTPS on 8443 using its own self-signed certificate, so
-	# the proxy hop must be https:// and must skip verification. Without
-	# tls_insecure_skip_verify every request fails with a TLS error that
-	# reads like a Caddy misconfiguration rather than an expected hop.
+	# Crafty serves HTTPS on 8443 with its own self-signed certificate, so the
+	# proxy hop must be https:// and must skip verification. Without
+	# tls_insecure_skip_verify every request fails with a TLS error that reads
+	# like a Caddy misconfiguration rather than an expected hop.
 	#
-	# This is not a weakening of the public TLS: the browser-facing
-	# certificate is a real Let's Encrypt one. This hop is container-to-
-	# container on an internal Docker network that is not routable from
-	# outside the host.
+	# This does not weaken the public TLS: the browser-facing certificate is a
+	# real Let's Encrypt one. This hop is container-to-container on an internal
+	# Docker network that is not routable from outside the host.
 	reverse_proxy https://crafty:8443 {
 		transport http {
 			tls_insecure_skip_verify
 		}
 
-		# Crafty's websockets (live console, server status) need these to
-		# survive the proxy, and a long read timeout so an idle console is
-		# not dropped mid-session.
-		header_up Host {upstream_hostport}
-		header_up X-Real-IP {remote_host}
+		# Forward the BROWSER's host, not this upstream's address.
+		#
+		# Crafty is a Tornado app whose websocket handler does not override
+		# check_origin, so it uses Tornado's default:
+		#
+		#   origin = urlparse(origin).netloc.lower()
+		#   host   = self.request.headers.get("Host").lower()
+		#   return origin == host
+		#
+		# The browser sends Origin: https://<your-hostname>. If Crafty's Host
+		# says anything else, those disagree, Tornado refuses the upgrade with
+		# "Cross origin websockets not allowed", and the panel shows:
+		#
+		#   Warning: WebSockets are required for Crafty to work. This websocket
+		#   connection has been closed. Are you using a reverse proxy?
+		#
+		# The page still loads, so it reads as cosmetic, but the live console,
+		# server status and file manager all stop updating.
+		#
+		# This line is required. Verified on a live instance: with no header_up
+		# at all, Crafty received host='crafty:8443' - when the upstream is given
+		# as host:port, Caddy sends that address as the Host rather than passing
+		# the client's through. {http.request.host} is the client's hostname
+		# without a port, which is what matches the Origin netloc on 443.
+		header_up Host {http.request.host}
+
+		# Everything else Crafty's proxy documentation asks for, Caddy already
+		# does unprompted: X-Forwarded-For, X-Forwarded-Proto and
+		# X-Forwarded-Host are set automatically, the Upgrade/Connection dance is
+		# handled natively, there is no upstream read timeout to cut an idle
+		# console off, and no request body limit to truncate a modpack upload.
 	}
 
 	log {

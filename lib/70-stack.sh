@@ -36,9 +36,16 @@ run_stack() {
     ok "compose.yaml written"
 
     install -d -m 0755 "$MCD_CADDY/data" "$MCD_CADDY/config"
+    # Note whether the config actually changed, so a re-run only restarts Caddy
+    # when there is something new to apply.
+    local caddy_before=''
+    [ -f "$MCD_CADDY/Caddyfile" ] && caddy_before="$(sha256sum "$MCD_CADDY/Caddyfile" | cut -d' ' -f1)"
     render "$MCD_SRC/templates/Caddyfile.tmpl" "$MCD_CADDY/Caddyfile" \
         HOSTNAME "$MCD_HOSTNAME" \
         EMAIL    "$MCD_EMAIL"
+    if [ "$caddy_before" != "$(sha256sum "$MCD_CADDY/Caddyfile" | cut -d' ' -f1)" ]; then
+        MCD_CADDY_CHANGED=1
+    fi
     ok "Caddyfile written for $MCD_HOSTNAME"
 
     info "Pulling images (this is the slow part)"
@@ -51,6 +58,27 @@ run_stack() {
         || die "Could not start the stack." \
                "Inspect it with: docker compose -f $MCD_ROOT/compose.yaml logs"
     ok "Containers started"
+
+    # The Caddyfile is a bind mount, so rewriting it does not change the
+    # container spec and `compose up -d` will not recreate the container. Left
+    # alone, a corrected Caddyfile simply never takes effect.
+    #
+    # Restart rather than `caddy reload`. The graceful reload reported "using
+    # config from file" and exited successfully while demonstrably still serving
+    # the previous configuration - the admin endpoint it needs was refusing
+    # connections inside the container. A reload that fails silently is worse
+    # than no reload, because the config on disk then disagrees with the config
+    # in effect and every subsequent test measures the wrong thing. A restart is
+    # sub-second and certificates live on a volume, so nothing is reissued.
+    if [ "${MCD_CADDY_CHANGED:-0}" = "1" ]; then
+        if compose restart caddy >>"$MCD_LOGFILE" 2>&1; then
+            ok "Caddy restarted to pick up the new configuration"
+        else
+            warn "Could not restart Caddy; check: mcd logs caddy"
+        fi
+    else
+        skip "Caddy configuration unchanged"
+    fi
 
     # All three of these report problems by returning non-zero, and all three
     # describe failures the user can still recover from: a slow first boot, a

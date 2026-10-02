@@ -86,18 +86,33 @@ EOT
                        "Register one free at https://www.duckdns.org/ and re-run."
             # Tolerate someone pasting the whole hostname.
             MCD_DUCKDNS_SUB="${MCD_DUCKDNS_SUB%%.duckdns.org}"
-            # Echoed on purpose, where a password would be hidden.
-            #
-            # This is a 36-character token that nobody types from memory; it gets
-            # pasted. A silent read shows nothing at all when you paste, so there
-            # is no way to tell whether the paste landed, whether the terminal
-            # swallowed it, or whether the prompt is simply broken - and the first
-            # person to try it reported exactly that. The token is also
-            # low-sensitivity: it controls only this account's DuckDNS subdomains,
-            # and it appears solely on the operator's own screen.
-            #
-            # Visible confirmation beats theoretical concealment here.
-            ask MCD_DUCKDNS_TOKEN "DuckDNS token (paste it - from the top of duckdns.org)" ""
+            # A re-run already holds the token, so do not ask for it again.
+            # Without this, every subsequent install or `mcd update` on a DuckDNS
+            # setup stops dead asking for a secret that is sitting on disk - and
+            # non-interactively it does not stop, it fails. Idempotent re-runs are
+            # a core promise of this installer; this broke it for DuckDNS users
+            # specifically, which is the recommended path.
+            if [ -z "${MCD_DUCKDNS_TOKEN:-}" ] && [ -r "$MCD_SECRETS/duckdns-token" ]; then
+                MCD_DUCKDNS_TOKEN="$(trim "$(cat "$MCD_SECRETS/duckdns-token")")"
+                [ -n "$MCD_DUCKDNS_TOKEN" ] \
+                    && info "Reusing the stored DuckDNS token (${#MCD_DUCKDNS_TOKEN} characters)"
+            fi
+
+            # Only prompt when we genuinely do not have it, and never route an
+            # existing value through ask(): ask() reports a pre-set variable as
+            # "<value> (from environment)", which would write the token into
+            # /var/log/mcd.log on every re-run. Echoing it live as the operator
+            # pastes is a deliberate choice; recording it in a logfile forever is
+            # not the same thing.
+            if [ -z "${MCD_DUCKDNS_TOKEN:-}" ]; then
+                # Echoed as typed, where a password would be hidden. This is a
+                # 36-character token nobody enters from memory - it is pasted -
+                # and a silent read shows nothing at all, so there is no way to
+                # tell whether the paste landed or the prompt is broken. The first
+                # person to use this reported exactly that. Visible confirmation
+                # beats concealment that only reaches the operator's own screen.
+                ask MCD_DUCKDNS_TOKEN "DuckDNS token (paste it - from the top of duckdns.org)" ""
+            fi
             [ -n "$MCD_DUCKDNS_TOKEN" ] \
                 || die "A DuckDNS token is required." \
                        "It is shown at the top of https://www.duckdns.org/ once signed in." \
