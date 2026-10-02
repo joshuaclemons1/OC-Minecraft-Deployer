@@ -41,7 +41,11 @@ trap 'rm -rf -- "${TMP:?}"' EXIT
 
 printf '\ndefault-creds.txt parsing\n'
 
-# Exactly the file a real install produced, password and all.
+# Shaped exactly like the file a real install produces: 64 characters, no
+# whitespace, and every awkward class Crafty's generator uses - # ^ @ * ! & $ -
+# which is what made the original grep parser run past the closing quote.
+# Synthetic on purpose. Never commit a password a real install handed out, even
+# a retired one: it ends up in git history, which outlives the install.
 REAL_PW='Xq#7v^Tz@9mK*2!p&4Rb$6Nd%8Gs#1Hw^3Jf@5Lk*7Zc&9Vx$2Qy%4Mn#6Bt^8Pr'
 cat >"$TMP/real.json" <<EOT
 {
