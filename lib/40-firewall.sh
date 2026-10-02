@@ -117,7 +117,12 @@ run_firewall() {
         cat >"$unit" <<EOT
 [Unit]
 Description=Reapply OC-Minecraft-Deployer firewall rules
-After=docker.service network-online.target
+# After netfilter-persistent as well as docker: Oracle's images ship
+# iptables-persistent, which restores /etc/iptables/rules.v4 at boot. That
+# file holds Oracle's original rules without ours, and iptables-restore
+# flushes the chains it defines, so running before it would see our rules
+# wiped moments later.
+After=docker.service netfilter-persistent.service network-online.target
 Wants=docker.service
 Requires=network-online.target
 

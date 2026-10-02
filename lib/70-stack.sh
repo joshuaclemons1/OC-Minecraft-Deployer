@@ -52,9 +52,18 @@ run_stack() {
                "Inspect it with: docker compose -f $MCD_ROOT/compose.yaml logs"
     ok "Containers started"
 
-    _mcd_wait_for_crafty
-    verify_java_in_container || MCD_JAVA_DEGRADED=1
-    _mcd_wait_for_certificate
+    # All three of these report problems by returning non-zero, and all three
+    # describe failures the user can still recover from: a slow first boot, a
+    # glibc mismatch that only affects newer Minecraft, or a certificate that
+    # cannot be issued until the Oracle security list is opened. Under `set -e`
+    # a bare call would abort the installer here, skipping run_finalize and
+    # leaving the box with no mcd command and no summary explaining what to fix.
+    # Record the outcome instead and let the summary carry the caveats.
+    _mcd_wait_for_crafty        || MCD_CRAFTY_SLOW=1
+    verify_java_in_container    || MCD_JAVA_DEGRADED=1
+    _mcd_wait_for_certificate   || MCD_TLS_OK=0
+
+    return 0
 }
 
 _mcd_wait_for_crafty() {
