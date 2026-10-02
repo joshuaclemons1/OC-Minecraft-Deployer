@@ -90,6 +90,7 @@ mcd_firewall_apply() {
         ufw --force allow "${BEDROCK_PORT}/udp"                 >/dev/null
         ok "ufw rules applied"
     else
+        protect_ssh
         _mcd_fw_ensure_input tcp 80 "HTTP (certificate issuing)"
         _mcd_fw_ensure_input tcp 443 "HTTPS (the web panel)"
         _mcd_fw_ensure_input tcp "${MC_PORT_START}:${MC_PORT_END}" \
@@ -98,6 +99,47 @@ mcd_firewall_apply() {
     fi
 
     _mcd_fw_fix_forward
+}
+
+# Must run before anything that reloads netfilter or flushes conntrack, which
+# installing Docker does.
+#
+# Oracle's images allow SSH with a NEW-only match:
+#
+#   -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+#   -A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT
+#   -A INPUT -j REJECT --reject-with icmp-host-prohibited
+#
+# So an already-open session survives only on the RELATED,ESTABLISHED rule. When
+# conntrack is flushed, its mid-stream packets are neither NEW (no SYN) nor
+# ESTABLISHED (tracking gone), so they reach the REJECT and the session dies with
+# "client_loop: send disconnect: Connection reset" - in the middle of the
+# install, which is exactly when a user is least able to deal with it.
+#
+# A stateless ACCEPT for port 22 makes SSH immune to that. Every install I ran
+# while developing this was detached with setsid, so the dropped connection was
+# invisible to me until someone ran it in the foreground.
+protect_ssh() {
+    step "Protecting the SSH session"
+
+    if ! have iptables; then
+        skip "iptables not present yet"
+        return 0
+    fi
+
+    if iptables -C INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null; then
+        skip "SSH already has a stateless ACCEPT rule"
+        return 0
+    fi
+
+    local idx
+    idx="$(_mcd_fw_first_block_index INPUT)"
+    if [ -n "$idx" ]; then
+        iptables -I INPUT "$idx" -p tcp --dport 22 -j ACCEPT
+    else
+        iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+    fi
+    ok "SSH will survive a conntrack flush"
 }
 
 run_firewall() {

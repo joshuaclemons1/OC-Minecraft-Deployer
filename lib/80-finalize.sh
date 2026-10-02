@@ -9,6 +9,15 @@ run_finalize() {
 
     _mcd_install_backup_timer
 
+    # Safe to start only now that mcd is on PATH.
+    if [ -f /etc/systemd/system/mcd-duckdns.timer ]; then
+        if systemctl start mcd-duckdns.timer >/dev/null 2>&1; then
+            ok "DuckDNS refresh timer started"
+        else
+            warn "Could not start mcd-duckdns.timer; check: systemctl status mcd-duckdns.timer"
+        fi
+    fi
+
     # Crafty generates its own admin password on first run and writes it here.
     # The file cannot be used to *set* a password, only to read the initial one,
     # so we copy it somewhere with tight permissions and tell the user once.

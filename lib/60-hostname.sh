@@ -90,6 +90,9 @@ EOT
 
             # Keep it current. Oracle public IPs are stable in practice, but an
             # ephemeral IP survives neither a stop/start nor a host migration.
+            # This step now runs before run_host, so create the directory here
+            # rather than relying on the host step having made it.
+            [ -d "$MCD_SECRETS" ] || install -d -m 0700 "$MCD_SECRETS"
             printf '%s\n' "$MCD_DUCKDNS_TOKEN" >"$MCD_SECRETS/duckdns-token"
             chmod 0600 "$MCD_SECRETS/duckdns-token"
             conf_set MCD_DUCKDNS_SUB "$MCD_DUCKDNS_SUB"
@@ -166,6 +169,8 @@ WantedBy=timers.target
 EOT
 
     systemctl daemon-reload
-    systemctl enable --now mcd-duckdns.timer >/dev/null 2>&1
+    # Enabled but not started: the service runs /usr/local/bin/mcd, which
+    # run_finalize installs later in the run. run_finalize starts the timer.
+    systemctl enable mcd-duckdns.timer >/dev/null 2>&1
     ok "DuckDNS record will refresh every 30 minutes"
 }

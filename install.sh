@@ -47,14 +47,26 @@ for stepfile in "$HERE"/lib/[0-9][0-9]-*.sh; do
     . "$stepfile"
 done
 
+# A dropped SSH session must not be able to strand the install, so every
+# question the user has to answer is asked first, before any work begins. The
+# hostname step holds all of the prompts; it used to sit sixth, which meant a
+# disconnect during the Docker install left the installer blocked on a prompt it
+# could no longer read, half finished. Asking first also gives DNS the whole
+# install to propagate.
 run_preflight
+run_hostname
+
 run_host
-# Docker before the firewall: the firewall step inspects Docker's own FORWARD
+
+# Before Docker: installing it reloads netfilter and flushes conntrack, and
+# Oracle's SSH rule is NEW-only, so an open session would be reset mid-install.
+protect_ssh
+
+# Docker before the firewall proper: that step inspects Docker's own FORWARD
 # chains to decide whether Oracle's blanket REJECT is sitting above them.
 run_docker
 run_firewall
 run_java
-run_hostname
 run_stack
 run_finalize
 
