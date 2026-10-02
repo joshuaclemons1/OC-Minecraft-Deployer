@@ -14,6 +14,28 @@ run_preflight() {
 
     case "$MCD_OS_ID" in
         ubuntu|debian) ok "${PRETTY_NAME:-$MCD_OS_ID}" ;;
+        ol|rhel|centos|rocky|almalinux|fedora)
+            # Oracle Linux is the *default* image in the OCI console, so this is
+            # the single most likely way for someone to end up on the wrong OS:
+            # they clicked Create without touching the image picker. Say exactly
+            # that, because "unsupported distribution" would leave them guessing
+            # at what they did wrong when the answer is "nothing, it is the
+            # default". Failing here beats dying at the first apt-get.
+            die "This is ${PRETTY_NAME:-$MCD_OS_ID}, which this installer does not support." \
+                "" \
+                "Oracle Linux is the default image in the Oracle Cloud console, so" \
+                "this is easy to end up on without noticing. It uses dnf, firewalld" \
+                "and SELinux rather than apt and iptables, and this installer is" \
+                "built for Debian-family systems throughout." \
+                "" \
+                "Rebuild the instance with Canonical Ubuntu 24.04:" \
+                "  1. Oracle console -> Compute -> Instances -> Create instance" \
+                "  2. Under Image and shape, click 'Change image'" \
+                "  3. Choose Canonical Ubuntu, version 24.04" \
+                "  4. Shape: Ampere VM.Standard.A1.Flex, 2 OCPUs, 12 GB" \
+                "" \
+                "Nothing has been changed on this machine."
+            ;;
         *)
             warn "This is built and tested for Ubuntu (and should work on Debian)."
             warn "Found: ${PRETTY_NAME:-$MCD_OS_ID}"

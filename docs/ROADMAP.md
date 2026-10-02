@@ -193,3 +193,18 @@ Each of these is a guess until the first live run proves or disproves it:
 - Every step idempotent — check before acting, never blindly append to config files.
 - All destructive actions confirm by default, with `--yes` for automation.
 - Error messages name the fix, not just the failure.
+
+## Oracle Linux support
+
+Not supported, and this matters more than it first appears: **Oracle Linux is
+the default image in the OCI console**, so a user who clicks Create without
+touching the image picker lands on an unsupported OS through no fault of their
+own. First real-world encounter with this project hit exactly that.
+
+Handled for now by failing in preflight with an explicit explanation and
+rebuild instructions, plus a callout in the README next to the image row.
+
+Supporting it properly would mean dnf instead of apt, firewalld instead of
+iptables, SELinux contexts on the bind mounts, and a second full test matrix.
+Worth reconsidering if people keep arriving on it, since being the console
+default means they will.

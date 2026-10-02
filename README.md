@@ -124,12 +124,17 @@ In the Oracle Cloud console, go to **Compute → Instances → Create instance**
 | Field | Value |
 |---|---|
 | Name | `minecraft` |
-| Image | **Canonical Ubuntu 24.04** (click *Change image*) |
+| Image | **Canonical Ubuntu 24.04** — click *Change image*, see the warning below |
 | Shape | **Ampere → VM.Standard.A1.Flex** (click *Change shape*) |
 | OCPUs | **2** |
 | Memory | **12 GB** |
 | Boot volume | 50 GB is fine; up to 190 GB if you want room for backups |
 | SSH keys | **Paste public keys** → paste the line you copied |
+
+> **The image picker defaults to Oracle Linux, not Ubuntu.** You have to change it. Oracle Linux uses
+> different package management and a different firewall, and the installer will refuse to run on it.
+> This is the easiest mistake to make on this page, because the default is pre-selected and looks
+> deliberate.
 
 > **Do not set 4 OCPUs or 24 GB.** That exceeds the current free limits and Oracle will terminate the instance.
 
