@@ -1,0 +1,510 @@
+#!/usr/bin/env bash
+#
+# mcd - manage an OC-Minecraft-Deployer installation.
+#
+# Most day-to-day work happens in the web panel. This covers what the panel
+# cannot: the host side, backups of the whole installation, and teardown.
+
+set -euo pipefail
+
+MCD_ROOT="${MCD_ROOT:-/opt/mcd}"
+MCD_SRC="$MCD_ROOT/src"
+
+if [ ! -r "$MCD_SRC/lib/common.sh" ]; then
+    printf 'mcd: cannot find %s\n' "$MCD_SRC/lib/common.sh" >&2
+    printf 'Is OC-Minecraft-Deployer installed? Re-run the installer.\n' >&2
+    exit 1
+fi
+
+# shellcheck source=../lib/common.sh
+. "$MCD_SRC/lib/common.sh"
+# shellcheck source=../lib/40-firewall.sh
+. "$MCD_SRC/lib/40-firewall.sh"
+conf_load
+
+need_root() {
+    [ "$(id -u)" -eq 0 ] || { printf 'mcd %s needs root. Try: sudo mcd %s\n' "$1" "$*" >&2; exit 1; }
+}
+
+usage() {
+    cat <<'EOT'
+mcd - manage your Minecraft host
+
+  mcd status              Is everything running? Memory, disk, certificate.
+  mcd logs [service]      Recent logs (service: crafty or caddy)
+  mcd creds               Show the panel's initial admin credentials
+  mcd password            How to change the panel password
+  mcd java                Which Java path to use for which Minecraft version
+
+  mcd backup              Back up every server now
+  mcd restore             List backups and restore one
+  mcd update              Update the panel, this tool, and system packages
+
+  mcd wipe-server [name]  Reset ONE server's world, keeping everything else
+  mcd uninstall           Remove everything and return to a stock Ubuntu box
+
+  mcd dns-update          Refresh the DuckDNS record (run by a timer)
+  mcd firewall apply      Reapply host firewall rules (run at boot)
+
+EOT
+}
+
+# --------------------------------------------------------------- status --
+
+cmd_status() {
+    printf '\n%sOC-Minecraft-Deployer%s\n\n' "$C_BOLD" "$C_RESET"
+
+    printf '  Panel     https://%s\n' "${MCD_HOSTNAME:-<not configured>}"
+    printf '  Public IP %s\n' "${MCD_PUBLIC_IP:-unknown}"
+    printf '  Crafty    %s\n\n' "$CRAFTY_TAG"
+
+    printf '  %sContainers%s\n' "$C_BOLD" "$C_RESET"
+    if [ -f "$MCD_ROOT/compose.yaml" ]; then
+        compose ps --format '    {{.Service}}  {{.State}}  {{.Status}}' 2>/dev/null \
+            || printf '    (could not query docker)\n'
+    else
+        printf '    no compose.yaml - not installed?\n'
+    fi
+
+    printf '\n  %sMemory%s\n' "$C_BOLD" "$C_RESET"
+    local total used avail
+    total="$(total_mem_mb)"
+    avail="$(awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo)"
+    used=$(( total - avail ))
+    printf '    %s MB total, %s MB used, %s MB available\n' "$total" "$used" "$avail"
+    printf '    recommended Minecraft heap on this box: %s MB\n' "$(suggested_heap_mb)"
+    if [ "$avail" -lt 800 ]; then
+        printf '    %s! Very little memory left. Servers may be OOM-killed.%s\n' "$C_YELLOW" "$C_RESET"
+        printf '      Lower a server'"'"'s allocation in the panel and restart it.\n'
+    fi
+
+    printf '\n  %sDisk%s\n' "$C_BOLD" "$C_RESET"
+    df -Ph "$MCD_ROOT" | awk 'NR==2 {printf "    %s used of %s (%s full) on %s\n", $3, $2, $5, $6}'
+    if [ -d "$MCD_BACKUPS" ]; then
+        printf '    backups: %s in %s\n' \
+            "$(du -sh "$MCD_BACKUPS" 2>/dev/null | cut -f1)" \
+            "$(find "$MCD_BACKUPS" -name '*.tar.gz' 2>/dev/null | wc -l) archive(s)"
+    fi
+
+    printf '\n  %sReachability%s\n' "$C_BOLD" "$C_RESET"
+    if [ -n "${MCD_HOSTNAME:-}" ]; then
+        local resolved
+        resolved="$(getent hosts "$MCD_HOSTNAME" 2>/dev/null | awk '{print $1; exit}')"
+        if [ -z "$resolved" ]; then
+            printf '    %s✗%s %s does not resolve\n' "$C_RED" "$C_RESET" "$MCD_HOSTNAME"
+        elif [ "$resolved" != "${MCD_PUBLIC_IP:-}" ]; then
+            printf '    %s!%s %s resolves to %s, expected %s\n' \
+                "$C_YELLOW" "$C_RESET" "$MCD_HOSTNAME" "$resolved" "${MCD_PUBLIC_IP:-?}"
+            printf '      Run: sudo mcd dns-update\n'
+        else
+            printf '    %s✓%s DNS points here\n' "$C_GREEN" "$C_RESET"
+        fi
+
+        if curl -fsS --max-time 10 -o /dev/null "https://${MCD_HOSTNAME}/" 2>/dev/null; then
+            printf '    %s✓%s HTTPS works with a valid certificate\n' "$C_GREEN" "$C_RESET"
+        else
+            printf '    %s✗%s cannot reach https://%s\n' "$C_RED" "$C_RESET" "$MCD_HOSTNAME"
+            printf '      Open 80 and 443 in the Oracle security list (separate\n'
+            printf '      from the firewall in here), then: mcd logs caddy\n'
+        fi
+    fi
+    printf '\n'
+}
+
+# ----------------------------------------------------------------- logs --
+
+cmd_logs() {
+    local svc="${1:-}"
+    if [ -n "$svc" ]; then
+        compose logs --tail 120 --no-color "$svc"
+    else
+        compose logs --tail 60 --no-color
+    fi
+}
+
+# ---------------------------------------------------------------- creds --
+
+cmd_creds() {
+    need_root creds
+    local f="$MCD_SECRETS/panel-creds.txt"
+    if [ -s "$f" ]; then
+        printf '\n  Panel: https://%s\n\n' "${MCD_HOSTNAME:-}"
+        sed 's/^/  /' "$f"
+        printf '\n  These are the credentials Crafty generated on first run.\n'
+        printf '  If you have changed the password in the panel, they are stale.\n\n'
+    else
+        printf 'No stored credentials at %s\n' "$f" >&2
+        printf 'Crafty writes them on first run to:\n' >&2
+        printf '  %s/config/default-creds.txt\n' "$MCD_DATA" >&2
+        exit 1
+    fi
+}
+
+cmd_password() {
+    cat <<EOT
+
+  Change the panel password in the panel itself:
+
+    1. Open  https://${MCD_HOSTNAME:-your-host}
+    2. Log in as the admin user
+    3. Panel Config -> Users -> click the user -> set a new password
+
+  Crafty owns its own user database and hashes passwords, so there is no safe
+  way to set one from out here. Editing default-creds.txt does nothing: that
+  file only records the password generated at first run.
+
+  If you are locked out entirely, Crafty's docs cover password recovery:
+    https://docs.craftycontrol.com/
+
+EOT
+}
+
+cmd_java() {
+    if [ -s "$MCD_STATE/java-map" ]; then
+        printf '\n  Java paths to set per server in the panel:\n\n'
+        sed 's/^/  /' "$MCD_STATE/java-map"
+        printf '\n'
+    else
+        printf 'No java map found. Re-run the installer.\n' >&2
+        exit 1
+    fi
+}
+
+# -------------------------------------------------------------- backups --
+
+cmd_backup() {
+    need_root backup
+    local quiet=0
+    [ "${1:-}" = "--quiet" ] && quiet=1
+
+    install -d -m 0750 "$MCD_BACKUPS"
+    local stamp archive
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    archive="$MCD_BACKUPS/servers-$stamp.tar.gz"
+
+    if [ ! -d "$MCD_DATA/servers" ] || [ -z "$(ls -A "$MCD_DATA/servers" 2>/dev/null)" ]; then
+        [ "$quiet" -eq 1 ] || printf 'No servers to back up yet.\n'
+        return 0
+    fi
+
+    [ "$quiet" -eq 1 ] || printf 'Backing up to %s\n' "$archive"
+
+    # Worlds are backed up while running, so a world that is mid-save could be
+    # captured inconsistently. Minecraft tolerates this far better than it used
+    # to, but for a guaranteed-clean copy stop the server in the panel first,
+    # or use the panel's own backup feature which handles the save properly.
+    tar -czf "$archive" -C "$MCD_DATA" servers config 2>/dev/null \
+        || { printf 'Backup failed.\n' >&2; rm -f "$archive"; exit 1; }
+    chmod 0640 "$archive"
+
+    [ "$quiet" -eq 1 ] || printf 'Done: %s\n' "$(du -h "$archive" | cut -f1)"
+
+    # Retention. Keep a week by default.
+    local keep="${MCD_BACKUP_KEEP_DAYS:-7}"
+    find "$MCD_BACKUPS" -maxdepth 1 -name 'servers-*.tar.gz' -mtime "+$keep" -delete 2>/dev/null || true
+
+    if [ "$quiet" -eq 0 ]; then
+        printf '\nThese live on the same machine, so they protect you from a bad\n'
+        printf 'plugin or a griefed world, not from losing the instance. Copy them\n'
+        printf 'off the box for that.\n'
+    fi
+}
+
+cmd_restore() {
+    need_root restore
+    local archives=()
+    while IFS= read -r line; do archives+=("$line"); done < <(
+        find "$MCD_BACKUPS" -maxdepth 1 -name 'servers-*.tar.gz' 2>/dev/null | sort -r
+    )
+
+    if [ "${#archives[@]}" -eq 0 ]; then
+        printf 'No backups in %s\n' "$MCD_BACKUPS" >&2
+        exit 1
+    fi
+
+    printf '\n  Available backups:\n\n'
+    local i=1 a
+    for a in "${archives[@]}"; do
+        printf '   %2d) %s  (%s)\n' "$i" "$(basename "$a")" "$(du -h "$a" | cut -f1)"
+        i=$(( i + 1 ))
+    done
+    printf '\n'
+
+    local choice
+    ask choice "Restore which number (empty to cancel)" ""
+    [ -n "$choice" ] || { printf 'Cancelled.\n'; return 0; }
+    case "$choice" in ''|*[!0-9]*) printf 'Not a number.\n' >&2; exit 1 ;; esac
+    [ "$choice" -ge 1 ] && [ "$choice" -le "${#archives[@]}" ] \
+        || { printf 'Out of range.\n' >&2; exit 1; }
+
+    local chosen="${archives[$(( choice - 1 ))]}"
+    printf '\n  This replaces the CURRENT servers and panel config with the\n'
+    printf '  contents of %s\n\n' "$(basename "$chosen")"
+    confirm "Really restore?" no || { printf 'Cancelled.\n'; return 0; }
+
+    printf 'Taking a safety backup of the current state first...\n'
+    cmd_backup --quiet
+
+    printf 'Stopping the stack...\n'
+    compose down >/dev/null 2>&1 || true
+    printf 'Restoring...\n'
+    tar -xzf "$chosen" -C "$MCD_DATA" \
+        || { printf 'Restore failed. Starting the stack again.\n' >&2; compose up -d; exit 1; }
+    printf 'Starting the stack...\n'
+    compose up -d >/dev/null
+    printf 'Done. Check the panel.\n'
+}
+
+# ---------------------------------------------------------------- update --
+
+cmd_update() {
+    need_root update
+    printf '==> Updating this tool\n'
+    if [ -d "$MCD_SRC/.git" ]; then
+        git -C "$MCD_SRC" fetch --quiet --depth 1 origin "$MCD_BRANCH"
+        git -C "$MCD_SRC" reset --quiet --hard "origin/$MCD_BRANCH"
+        install -m 0755 "$MCD_SRC/bin/mcd" /usr/local/bin/mcd
+        printf '    now at %s\n' "$(git -C "$MCD_SRC" rev-parse --short HEAD)"
+    else
+        printf '    not a git checkout, skipping\n'
+    fi
+
+    printf '==> Updating the panel\n'
+    printf '    taking a backup first\n'
+    cmd_backup --quiet
+    compose pull --quiet
+    compose up -d
+    printf '    done\n'
+
+    printf '==> Updating system packages\n'
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get upgrade -y -qq
+    printf '    done\n'
+
+    if [ -f /var/run/reboot-required ]; then
+        printf '\n! A reboot is required to finish applying updates.\n'
+        printf '  Everything restarts automatically afterwards:  sudo reboot\n'
+    fi
+}
+
+# ------------------------------------------------------------------- dns --
+
+cmd_dns_update() {
+    need_root dns-update
+    local sub="${MCD_DUCKDNS_SUB:-}" token=''
+    [ -n "$sub" ] || { printf 'Not using DuckDNS.\n' >&2; exit 0; }
+    [ -r "$MCD_SECRETS/duckdns-token" ] \
+        || { printf 'No DuckDNS token stored.\n' >&2; exit 1; }
+    token="$(cat "$MCD_SECRETS/duckdns-token")"
+
+    local response
+    response="$(curl -fsS --max-time 20 \
+        "https://www.duckdns.org/update?domains=${sub}&token=${token}&ip=" 2>&1)" \
+        || response='request failed'
+    case "$response" in
+        OK*) printf 'DuckDNS updated.\n' ;;
+        *)   printf 'DuckDNS said: %s\n' "$response" >&2; exit 1 ;;
+    esac
+}
+
+cmd_firewall() {
+    need_root firewall
+    case "${1:-}" in
+        apply) mcd_firewall_apply ;;
+        *) printf 'Usage: mcd firewall apply\n' >&2; exit 1 ;;
+    esac
+}
+
+# -------------------------------------------------------------- wiping --
+
+# Crafty stores each server in its own directory keyed by UUID, so there is no
+# friendly name on disk. Read server.properties to show something recognisable.
+_mcd_server_label() {
+    local dir="$1" props="$1/server.properties" level='' motd=''
+    if [ -r "$props" ]; then
+        level="$(awk -F= '/^level-name=/ {print $2; exit}' "$props" | tr -d '\r')"
+        motd="$(awk -F= '/^motd=/ {sub(/^motd=/,""); print; exit}' "$props" | tr -d '\r')"
+    fi
+    printf '%s' "${motd:-${level:-$(basename "$dir")}}"
+}
+
+cmd_wipe_server() {
+    need_root wipe-server
+    local want="${1:-}"
+
+    local dirs=()
+    while IFS= read -r d; do dirs+=("$d"); done < <(
+        find "$MCD_DATA/servers" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort
+    )
+    if [ "${#dirs[@]}" -eq 0 ]; then
+        printf 'No servers found in %s\n' "$MCD_DATA/servers" >&2
+        exit 1
+    fi
+
+    local target=''
+    if [ -n "$want" ]; then
+        local d
+        for d in "${dirs[@]}"; do
+            if [ "$(basename "$d")" = "$want" ] || [ "$(_mcd_server_label "$d")" = "$want" ]; then
+                target="$d"; break
+            fi
+        done
+        [ -n "$target" ] || printf 'No server matching "%s".\n' "$want" >&2
+    fi
+
+    if [ -z "$target" ]; then
+        printf '\n  Servers:\n\n'
+        local i=1 d
+        for d in "${dirs[@]}"; do
+            local level
+            level="$(awk -F= '/^level-name=/ {print $2; exit}' "$d/server.properties" 2>/dev/null | tr -d '\r')"
+            printf '   %2d) %s\n' "$i" "$(_mcd_server_label "$d")"
+            printf '       dir: %s  world: %s  size: %s\n' \
+                "$(basename "$d")" "${level:-unknown}" "$(du -sh "$d" 2>/dev/null | cut -f1)"
+            i=$(( i + 1 ))
+        done
+        printf '\n'
+        local choice
+        ask choice "Wipe which number (empty to cancel)" ""
+        [ -n "$choice" ] || { printf 'Cancelled.\n'; return 0; }
+        case "$choice" in ''|*[!0-9]*) printf 'Not a number.\n' >&2; exit 1 ;; esac
+        [ "$choice" -ge 1 ] && [ "$choice" -le "${#dirs[@]}" ] \
+            || { printf 'Out of range.\n' >&2; exit 1; }
+        target="${dirs[$(( choice - 1 ))]}"
+    fi
+
+    local level
+    level="$(awk -F= '/^level-name=/ {print $2; exit}' "$target/server.properties" 2>/dev/null | tr -d '\r')"
+    level="${level:-world}"
+
+    printf '\n  About to delete the world from:\n'
+    printf '    %s\n' "$(_mcd_server_label "$target")"
+    printf '    %s/{%s,%s_nether,%s_the_end}\n\n' "$target" "$level" "$level" "$level"
+    printf '  The server itself, its mods, plugins and configuration all stay.\n'
+    printf '  A backup is taken first.\n\n'
+    confirm "Delete this world?" no || { printf 'Cancelled.\n'; return 0; }
+
+    printf 'Backing up first...\n'
+    cmd_backup --quiet
+
+    printf 'Stopping the panel so the world is not in use...\n'
+    compose stop crafty >/dev/null 2>&1 || true
+
+    local w
+    for w in "$level" "${level}_nether" "${level}_the_end"; do
+        if [ -d "$target/$w" ]; then
+            rm -rf -- "$target/$w"
+            printf '  removed %s\n' "$w"
+        fi
+    done
+
+    printf 'Starting the panel...\n'
+    compose start crafty >/dev/null 2>&1 || compose up -d >/dev/null
+    printf '\nDone. Start the server in the panel and it will generate a fresh world.\n'
+}
+
+# ----------------------------------------------------------- uninstall --
+
+cmd_uninstall() {
+    need_root uninstall
+    local purge=0
+    [ "${1:-}" = "--purge" ] && purge=1
+
+    printf '\n  %sThis removes the whole installation:%s\n\n' "$C_BOLD" "$C_RESET"
+    printf '    - the Crafty and Caddy containers and their images\n'
+    printf '    - every Minecraft server and world under %s\n' "$MCD_DATA"
+    printf '    - the systemd timers and units this installed\n'
+    printf '    - the firewall rules this added\n'
+    printf '    - /usr/local/bin/mcd\n'
+    if [ "$purge" -eq 1 ]; then
+        printf '    - %sand your backups in %s%s\n' "$C_RED" "$MCD_BACKUPS" "$C_RESET"
+    else
+        printf '\n  Your backups in %s are KEPT.\n' "$MCD_BACKUPS"
+        printf '  Use --purge to delete those too.\n'
+    fi
+    printf '\n  Afterwards you can re-run the installer for a clean slate without\n'
+    printf '  touching anything in the Oracle console.\n\n'
+
+    local reply
+    printf '  Type exactly: wipe it\n' >&2
+    ask reply "Confirm" ""
+    [ "$reply" = "wipe it" ] || { printf 'Cancelled.\n'; return 0; }
+
+    printf '\n==> Stopping and removing containers\n'
+    if [ -f "$MCD_ROOT/compose.yaml" ]; then
+        compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+    fi
+    docker rmi "$CRAFTY_IMAGE:$CRAFTY_TAG" "$CADDY_IMAGE" >/dev/null 2>&1 || true
+    printf '    done\n'
+
+    printf '==> Removing systemd units\n'
+    local unit
+    for unit in mcd-backup.timer mcd-backup.service mcd-duckdns.timer \
+                mcd-duckdns.service mcd-firewall.service; do
+        systemctl disable --now "$unit" >/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/$unit"
+    done
+    systemctl daemon-reload
+    printf '    done\n'
+
+    printf '==> Removing firewall rules\n'
+    if have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
+        ufw --force delete allow 80/tcp >/dev/null 2>&1 || true
+        ufw --force delete allow 443/tcp >/dev/null 2>&1 || true
+        ufw --force delete allow "${MC_PORT_START}:${MC_PORT_END}/tcp" >/dev/null 2>&1 || true
+        ufw --force delete allow "${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true
+    else
+        iptables -D INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+        iptables -D INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+        iptables -D INPUT -p tcp --dport "${MC_PORT_START}:${MC_PORT_END}" -j ACCEPT 2>/dev/null || true
+        iptables -D INPUT -p udp --dport "$BEDROCK_PORT" -j ACCEPT 2>/dev/null || true
+    fi
+    printf '    done\n'
+
+    printf '==> Removing files\n'
+    rm -f /usr/local/bin/mcd /etc/sysctl.d/99-mcd.conf
+    if [ "$purge" -eq 1 ]; then
+        rm -rf "$MCD_ROOT"
+        printf '    removed %s including backups\n' "$MCD_ROOT"
+    else
+        local keep
+        keep="$(mktemp -d)"
+        [ -d "$MCD_BACKUPS" ] && mv "$MCD_BACKUPS" "$keep/backups" 2>/dev/null || true
+        rm -rf "$MCD_ROOT"
+        if [ -d "$keep/backups" ]; then
+            install -d -m 0755 "$MCD_ROOT"
+            mv "$keep/backups" "$MCD_BACKUPS"
+            printf '    removed %s, kept backups in %s\n' "$MCD_ROOT" "$MCD_BACKUPS"
+        fi
+        rm -rf "$keep"
+    fi
+
+    printf '\n  Done. Docker itself and the 2 GB swapfile were left in place:\n'
+    printf '  removing Docker while it is running is unreliable, and dropping\n'
+    printf '  swap on a 12 GB box is worth doing deliberately, not as a side\n'
+    printf '  effect. To finish by hand:\n\n'
+    printf '    sudo apt-get purge -y docker-ce docker-ce-cli containerd.io \\\n'
+    printf '         docker-buildx-plugin docker-compose-plugin\n'
+    printf '    sudo swapoff /swapfile && sudo rm -f /swapfile\n'
+    printf '    sudo sed -i "/^\\/swapfile/d" /etc/fstab\n\n'
+}
+
+# ------------------------------------------------------------------ main --
+
+case "${1:-}" in
+    status)      shift; cmd_status "$@" ;;
+    logs)        shift; cmd_logs "$@" ;;
+    creds)       shift; cmd_creds "$@" ;;
+    password)    shift; cmd_password "$@" ;;
+    java)        shift; cmd_java "$@" ;;
+    backup)      shift; cmd_backup "$@" ;;
+    restore)     shift; cmd_restore "$@" ;;
+    update)      shift; cmd_update "$@" ;;
+    wipe-server) shift; cmd_wipe_server "$@" ;;
+    uninstall)   shift; cmd_uninstall "$@" ;;
+    dns-update)  shift; cmd_dns_update "$@" ;;
+    firewall)    shift; cmd_firewall "$@" ;;
+    ''|help|-h|--help) usage ;;
+    *) printf 'mcd: unknown command "%s"\n\n' "$1" >&2; usage >&2; exit 1 ;;
+esac

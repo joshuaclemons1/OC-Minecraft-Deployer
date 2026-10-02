@@ -4,7 +4,7 @@ Turn a free Oracle Cloud server into a Minecraft server you manage entirely from
 
 One command sets up the whole machine. After that you never need the command line again — you create servers, pick versions, install modpacks, upload mods, read the console, and restart things from a web panel you can share with your friends.
 
-> **Status: pre-release.** The documentation below describes the finished tool. The bootstrap script is still being built — see the [roadmap](docs/ROADMAP.md) for what works today and what is next. Anything not yet implemented is marked **(planned)**.
+> **Status: works, but not yet validated on a live instance.** Every step below is implemented and the logic is unit-tested, but the installer has not yet completed an end-to-end run on a real Oracle Cloud box. Treat the first run as a test, not as something to put a world you care about on. Items still unbuilt are marked **(planned)**. See the [roadmap](docs/ROADMAP.md).
 
 ---
 
@@ -169,10 +169,18 @@ Connect to your server from PowerShell, replacing the IP with yours:
 ssh ubuntu@203.0.113.42
 ```
 
-Type `yes` when it asks about authenticity. Then paste this single line: **(planned)**
+Type `yes` when it asks about authenticity. Then paste this single line:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/joshuaclemons1/OC-Minecraft-Deployer/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/joshuaclemons1/OC-Minecraft-Deployer/main/bootstrap.sh | sudo bash
+```
+
+If you would rather read a script before running it as root — a good habit, and this one does ask for root — do it in two steps instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/joshuaclemons1/OC-Minecraft-Deployer/main/bootstrap.sh -o bootstrap.sh
+less bootstrap.sh
+sudo bash bootstrap.sh
 ```
 
 It will ask you a handful of plain-English questions — your DuckDNS name and token (or nothing, to use the automatic hostname), an email for certificate expiry notices, and how much memory to reserve for Minecraft. Then it takes roughly 5–10 minutes and prints:
@@ -182,7 +190,8 @@ It will ask you a handful of plain-English questions — your DuckDNS name and t
   Username:  admin
   Password:  <a long generated password, shown once>
 
-  Save that password now. Rotate it any time with:  mcd password
+  Save that password now. It is also kept at
+  /opt/mcd/secrets/panel-creds.txt
 ```
 
 The script is **idempotent** — safe to run again. It will not duplicate anything or wipe your worlds.
@@ -226,8 +235,10 @@ Your server is ARM (aarch64), not Intel or AMD. Java itself is completely fine w
 The panel uses **one shared admin password** by default — simple to hand out, and anyone who has it can do anything, including deleting worlds. That is the intended trade-off for a server among friends who trust each other.
 
 ```bash
-mcd password          # generate and show a new admin password
+sudo mcd creds        # show the credentials generated at install time
 ```
+
+To change the password, do it in the panel under **Panel Config → Users**. Crafty owns its own user database and password hashing, so there is deliberately no way to set it from the command line — `mcd password` just prints these instructions.
 
 If you later want to be stricter, Crafty supports individual accounts with per-server permissions (for example: can restart and read the console, cannot delete). Create them under **Panel Config → Users**. Worth doing if your circle grows past people you would trust with a world delete.
 
@@ -241,26 +252,28 @@ You are putting a control panel on the public internet, so two rules actually ma
 
 That CVE needed only *a* valid login, not an admin one. So a limited account for a friend would not have protected you from it. Per-user accounts are good for limiting accidents and for revoking access cleanly; they are not a substitute for staying patched.
 
-**Use a password you use nowhere else.** The generated one is fine — keep it. If you hand it to several people, treat it as semi-public and rotate it with `mcd password` when someone leaves the group.
+**Use a password you use nowhere else.** The generated one is fine — keep it. If you hand it to several people, treat it as semi-public and change it in the panel when someone leaves the group.
 
 ---
 
 ## Day-to-day commands
 
-The installer provides a small helper called `mcd`. You can do nearly everything in the web panel instead — this is for the rest. **(planned)**
+The installer provides a small helper called `mcd`. You can do nearly everything in the web panel instead — this is for the host side, which the panel cannot reach.
 
 ```bash
-mcd status                  # is everything running? how much memory is free?
+mcd status                  # running? memory, disk, DNS, certificate
+mcd logs [crafty|caddy]     # recent logs
+mcd creds                   # show the panel's initial admin credentials
+mcd java                    # which Java path to use for which MC version
+
 mcd backup                  # back up every server right now
 mcd restore                 # list backups and restore one
-mcd password                # rotate the panel admin password
-mcd update                  # update the panel and system packages
-mcd logs                    # recent panel and proxy logs
+mcd update                  # update the panel, this tool, and the system
 
-mcd wipe-server <name>      # delete one server's world and start it fresh,
-                            #   keeping the panel, users, and other servers
-mcd uninstall               # remove everything this installed and return the
-                            #   machine to a stock Ubuntu box
+mcd wipe-server [name]      # reset ONE server's world, keeping the panel,
+                            #   users, mods, config and other servers
+mcd uninstall               # remove everything and return the machine to a
+                            #   stock Ubuntu box (keeps backups; --purge drops them)
 ```
 
 ### Backups

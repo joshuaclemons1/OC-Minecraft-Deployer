@@ -104,6 +104,54 @@ Mitigation to design: a minimal, honest activity floor (the JVM holding its heap
 - ARM: mods and plugins with x86-only native code will fail. Collect a known-bad list as it emerges.
 - No swap on Oracle's Ubuntu images by default. On 12 GB, add a modest swapfile as an OOM cushion.
 
+## Status
+
+Phases 1–3 are written and the pure logic is unit-tested (`bash tests/unit.sh`,
+32 assertions). **Nothing has been run end-to-end on a live Oracle instance
+yet** — that is the next step, and until it happens every step below is
+"implemented" rather than "working".
+
+What exists:
+
+| File | Does |
+|---|---|
+| `bootstrap.sh` | Stage 0 for `curl \| sudo bash`: fetches the repo, hands to `install.sh` |
+| `install.sh` | Orchestrates the steps, parses flags, sets up logging |
+| `lib/common.sh` | Paths, version floors, logging, tty-safe prompts, helpers |
+| `lib/10-preflight.sh` | OS/arch checks, free-tier limit warning, disk, connectivity |
+| `lib/20-host.sh` | Layout, packages, swapfile, swappiness, unattended-upgrades |
+| `lib/30-docker.sh` | Docker CE + compose plugin from Docker's apt repo, log rotation |
+| `lib/40-firewall.sh` | The INPUT and FORWARD fixes, plus a boot-time reassert unit |
+| `lib/50-java.sh` | Temurin 21/25 install, version map, in-container verification |
+| `lib/60-hostname.sh` | DuckDNS / custom / sslip.io, DNS pre-check, refresh timer |
+| `lib/70-stack.sh` | Renders templates, CVE floor check, brings the stack up, waits for TLS |
+| `lib/80-finalize.sh` | Installs `mcd`, backup timer, prints the handover summary |
+| `bin/mcd` | status, logs, creds, java, backup, restore, update, wipe-server, uninstall |
+| `templates/` | compose.yaml and Caddyfile |
+| `tests/unit.sh` | Unit tests for the pure helpers |
+| `.github/workflows/ci.yml` | shellcheck, CRLF guard, unit tests, template validation |
+
+Deliberately not implemented yet: Modrinth modpack automation, off-box backups
+to Object Storage, the idle-reclamation mitigation, Geyser, Terraform.
+
+### Known-unverified assumptions
+
+Each of these is a guess until the first live run proves or disproves it:
+
+1. **Temurin aarch64 runs against the Crafty image's glibc.** The whole
+   bind-mount approach rests on this. `verify_java_in_container` tests it
+   explicitly and degrades loudly rather than silently.
+2. **Oracle's FORWARD REJECT really does sit below Docker's chains** in
+   practice. The code handles both orders, but only a live box confirms which
+   one actually occurs.
+3. **`default-creds.txt` format.** The parser in `80-finalize.sh` greps for
+   username and password; if the real file is shaped differently it falls back
+   to pointing at the file, but the summary will be less useful.
+4. **Crafty accepts a per-server Java path** pointing outside `/usr/lib/jvm`.
+   Expected to be a free-text field; needs confirming in the UI.
+5. **`compose ps --status running --services`** flag support on the installed
+   compose version.
+
 ## Order of work
 
 ### Phase 1 — a working server

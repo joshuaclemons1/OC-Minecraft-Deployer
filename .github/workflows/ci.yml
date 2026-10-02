@@ -1,0 +1,87 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shell:
+    name: shellcheck + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+
+      # The project is authored on Windows. A CRLF that slips past
+      # .gitattributes produces "bad interpreter: /usr/bin/env bash^M" on the
+      # instance, which is a baffling error to debug remotely. Catch it here.
+      - name: Reject CRLF line endings in scripts
+        run: |
+          bad=0
+          while IFS= read -r f; do
+            if grep -qU $'\r' "$f"; then
+              echo "::error file=$f::contains CRLF line endings"
+              bad=1
+            fi
+          done < <(git ls-files '*.sh' '*.yaml' '*.yml' '*.tmpl' 'bin/mcd')
+          exit $bad
+
+      - name: Scripts are syntactically valid
+        run: |
+          for f in bootstrap.sh install.sh lib/*.sh bin/mcd tests/*.sh; do
+            bash -n "$f" || exit 1
+          done
+
+      - name: shellcheck
+        run: |
+          # lib/*.sh and bin/mcd are sourced, not standalone, so tell
+          # shellcheck where the definitions come from.
+          shellcheck -x -S warning \
+            bootstrap.sh install.sh tests/unit.sh lib/*.sh bin/mcd
+
+      - name: Unit tests
+        run: bash tests/unit.sh
+
+  compose:
+    name: compose template renders
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Catch a malformed compose.yaml here rather than halfway through an
+      # install on someone's instance.
+      - name: Render and validate the templates
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/render
+          sed -e 's|@@CRAFTY_IMAGE@@|registry.gitlab.com/crafty-controller/crafty-4|' \
+              -e 's|@@CRAFTY_TAG@@|4.11.0|' \
+              -e 's|@@CADDY_IMAGE@@|caddy:2-alpine|' \
+              -e 's|@@TZ@@|Etc/UTC|' \
+              -e 's|@@MC_PORT_START@@|25565|g' \
+              -e 's|@@MC_PORT_END@@|25575|g' \
+              -e 's|@@BEDROCK_PORT@@|19132|g' \
+              -e 's|@@MCD_DATA@@|/opt/mcd/crafty|g' \
+              -e 's|@@MCD_JAVA@@|/opt/mcd/java|g' \
+              -e 's|@@MCD_CADDY@@|/opt/mcd/caddy|g' \
+              templates/compose.yaml.tmpl > /tmp/render/compose.yaml
+          if grep -q '@@' /tmp/render/compose.yaml; then
+            echo "::error::unsubstituted placeholders remain"
+            grep -n '@@' /tmp/render/compose.yaml
+            exit 1
+          fi
+          docker compose -f /tmp/render/compose.yaml config >/dev/null
+          echo "compose.yaml is valid"
+
+      - name: Caddyfile is valid
+        run: |
+          set -euo pipefail
+          sed -e 's|@@HOSTNAME@@|mc.example.com|' \
+              -e 's|@@EMAIL@@|admin@example.com|' \
+              templates/Caddyfile.tmpl > /tmp/render/Caddyfile
+          docker run --rm -v /tmp/render/Caddyfile:/etc/caddy/Caddyfile:ro \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
