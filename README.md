@@ -1,0 +1,1 @@
+# Project to set up an Oracle Cloud instance to run a Minecraft server with custimization for setup, version and mod support, server control panel and much more.
