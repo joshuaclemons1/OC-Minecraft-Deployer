@@ -49,9 +49,10 @@ MC_PORT_END="${MC_PORT_END:-25575}"
 BEDROCK_PORT="${BEDROCK_PORT:-19132}"
 
 # Memory held back from Minecraft for the OS, Docker, Crafty and page cache.
-# The free tier is 12 GB total since Oracle halved it on 2026-06-15, so this
-# is a meaningful fraction and not a rounding error.
-MCD_RESERVE_MB="${MCD_RESERVE_MB:-2560}"
+# Scaled to the box rather than flat: 2.5 GB is about right on a 12 GB
+# instance but is 42% of a 6 GB one, which would leave a small box with an
+# absurdly small heap. An explicit MCD_RESERVE_MB always wins.
+MCD_RESERVE_MB="${MCD_RESERVE_MB:-}"
 MCD_MIN_HEAP_MB="${MCD_MIN_HEAP_MB:-1024}"
 
 # -------------------------------------------------------------- logging --
@@ -195,11 +196,19 @@ gen_password() {
 
 total_mem_mb() { awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo; }
 
+reserve_mb() {
+    if [ -n "${MCD_RESERVE_MB:-}" ]; then printf '%d' "$MCD_RESERVE_MB"; return; fi
+    local total
+    total="$(total_mem_mb)"
+    if [ "$total" -le 8192 ]; then printf '1536'; else printf '2560'; fi
+}
+
 # Heap we recommend for Minecraft given real installed memory.
 suggested_heap_mb() {
-    local total heap
+    local total heap reserve
     total="$(total_mem_mb)"
-    heap=$(( total - MCD_RESERVE_MB ))
+    reserve="$(reserve_mb)"
+    heap=$(( total - reserve ))
     [ "$heap" -lt 0 ] && heap=0
     # Round down to a whole gigabyte; odd megabyte values look like bugs.
     heap=$(( heap / 1024 * 1024 ))

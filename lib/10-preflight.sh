@@ -105,7 +105,7 @@ run_preflight() {
 
     MCD_HEAP_SUGGESTED="$(suggested_heap_mb)"
     if [ "$MCD_HEAP_SUGGESTED" -lt "$MCD_MIN_HEAP_MB" ]; then
-        die "After reserving ${MCD_RESERVE_MB} MB for the system there is not enough left for Minecraft." \
+        die "After reserving $(reserve_mb) MB for the system there is not enough left for Minecraft." \
             "Total RAM: ${total_mb} MB. Use an instance with at least 4 GB."
     fi
     info "Recommended Minecraft heap: ${MCD_HEAP_SUGGESTED} MB"

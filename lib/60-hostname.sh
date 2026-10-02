@@ -9,9 +9,15 @@
 #   custom   a domain the user already owns and has pointed here
 #   sslip.io zero-signup fallback: 203-0-113-42.sslip.io resolves to that IP
 #
-# sslip.io is on the Public Suffix List, so each subdomain counts as its own
-# registrable domain for Let's Encrypt rate limiting rather than sharing one
-# bucket with every other user.
+# sslip.io is a best-effort fallback, not an equal option. It is NOT on the
+# Public Suffix List, so Let's Encrypt treats the whole domain as a single
+# registered domain and every user in the world shares one certificate
+# budget. Let's Encrypt has raised the ceiling for these magic-DNS domains
+# (nip.io sits at 250,000 per 7 days), so it works in practice, but there is
+# no fallback if it is ever exhausted or the service goes away, and a
+# rate-limit failure here is indistinguishable from a misconfiguration.
+# DuckDNS gives a dedicated hostname with its own budget, which is why it is
+# offered first.
 
 _mcd_resolves_to() {
     # True when $1 resolves to $2. getent uses NSS, so no dig dependency.

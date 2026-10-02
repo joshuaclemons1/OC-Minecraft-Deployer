@@ -88,7 +88,7 @@ You need:
 1. **An Oracle Cloud account.** Signing up requires a credit card for identity verification. You are not charged for Always Free resources, but be aware Oracle will try to upsell you to Pay As You Go — you can ignore it.
 2. **An SSH key pair.** Windows 11 has this built in; instructions below.
 3. **About 45 minutes**, most of which is waiting on Oracle.
-4. *Optional but recommended:* a free [DuckDNS](https://www.duckdns.org/) account, which gives you a free hostname like `yourname.duckdns.org`. Takes 30 seconds, sign in with Google or GitHub. If you skip it, the installer falls back to an automatic hostname derived from your server's IP address, which also works but is ugly.
+4. *Optional but recommended:* a free [DuckDNS](https://www.duckdns.org/) account, which gives you a free hostname like `yourname.duckdns.org`. Takes 30 seconds, sign in with Google or GitHub. If you skip it, the installer falls back to an automatic hostname derived from your server's IP address (sslip.io). That works, but it is a shared resource: every sslip.io user in the world draws on one Let's Encrypt certificate allowance, so it can in principle run out. DuckDNS gives you a name nobody else is drawing against, and takes half a minute.
 
 You do **not** need to know Linux. You will paste in one command.
 

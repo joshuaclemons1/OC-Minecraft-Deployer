@@ -53,16 +53,23 @@ check_false "empty"                 is_valid_ipv4 ''
 check_false "not-an-ip"             is_valid_ipv4 not-an-ip
 check_false "1.2.3. (trailing dot)" is_valid_ipv4 '1.2.3.'
 
-printf '\nsuggested_heap_mb (reserve=%s)\n' "$MCD_RESERVE_MB"
+printf '\nreserve_mb + suggested_heap_mb\n'
 _heap_for() {
     # Fake /proc/meminfo by overriding total_mem_mb.
     local mb="$1"
     total_mem_mb() { printf '%d' "$mb"; }
     suggested_heap_mb
 }
+_reserve_for() { local mb="$1"; total_mem_mb() { printf '%d' "$mb"; }; reserve_mb; }
+check "12 GB box reserves 2560"          2560  "$(_reserve_for 12288)"
+check "6 GB box reserves only 1536"      1536  "$(_reserve_for 6144)"
+check "8 GB is the boundary"             1536  "$(_reserve_for 8192)"
+check "just over 8 GB reserves 2560"     2560  "$(_reserve_for 8193)"
+check "explicit override wins"           999   "$(MCD_RESERVE_MB=999 _reserve_for 6144)"
 check "12 GB box leaves a whole-GB heap" 9216  "$(_heap_for 12288)"
 check "24 GB box (pre-June-2026 shape)"  21504 "$(_heap_for 24288)"
-check "4 GB box"                         1024  "$(_heap_for 4096)"
+check "6 GB test box gets a usable heap" 4096  "$(_heap_for 6144)"
+check "4 GB box"                         2048  "$(_heap_for 4096)"
 check "2 GB box yields nothing usable"   0     "$(_heap_for 2048)"
 check "heap is always a whole GB"        9216  "$(_heap_for 12000)"
 
